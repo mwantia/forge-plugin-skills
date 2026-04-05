@@ -12,14 +12,34 @@ import (
 	"github.com/mwantia/forge-sdk/pkg/plugins"
 )
 
-func (p *SkillsToolsDriver) GetLifecycle() plugins.Lifecycle {
-	return p
+type SkillToolsPlugin struct {
+	plugins.UnimplementedToolsPlugin
+
+	driver *SkillsDriver
+	path   string
+	skills map[string]*Skill
 }
 
-// scanSkills scans the directory for SKILL.md files and parses them.
-func (p *SkillsToolsDriver) scanSkills(root string) (map[string]*Skill, error) {
-	skills := make(map[string]*Skill)
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+func NewSkillToolsPlugin(driver *SkillsDriver) (*SkillToolsPlugin, error) {
+	path := driver.config.Path
+	if path == "" {
+		path = "./skills"
+	}
+
+	return &SkillToolsPlugin{
+		driver: driver,
+		path:   path,
+		skills: make(map[string]*Skill),
+	}, nil
+}
+
+func (p *SkillToolsPlugin) GetLifecycle() plugins.Lifecycle {
+	return p.driver
+}
+
+func (p *SkillToolsPlugin) scanSkills() error {
+	p.driver.log.Info("Searching SKILL tools", "path", p.path)
+	err := filepath.WalkDir(p.path, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -32,24 +52,22 @@ func (p *SkillsToolsDriver) scanSkills(root string) (map[string]*Skill, error) {
 
 		skill, err := p.parseSkillFile(path)
 		if err != nil {
-			p.log.Warn("Failed to parse skill file", "path", path, "error", err)
+			p.driver.log.Warn("Failed to parse skill file", "path", path, "error", err)
 			return nil // Continue scanning other files
 		}
 
-		skills[skill.Name] = skill
-		p.log.Trace("Loaded skill", "name", skill.Name, "path", path)
+		p.skills[skill.Name] = skill
+		p.driver.log.Trace("Loaded skill", "name", skill.Name, "path", path)
 		return nil
 	})
-
 	if err != nil {
-		return nil, fmt.Errorf("failed to walk root directory: %w", err)
+		return fmt.Errorf("failed to walk skills directory: %w", err)
 	}
 
-	return skills, nil
+	return nil
 }
 
-// parseSkillFile parses a SKILL.md file into a Skill struct.
-func (p *SkillsToolsDriver) parseSkillFile(path string) (*Skill, error) {
+func (p *SkillToolsPlugin) parseSkillFile(path string) (*Skill, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -58,6 +76,7 @@ func (p *SkillsToolsDriver) parseSkillFile(path string) (*Skill, error) {
 	skill := &Skill{
 		Path:       path,
 		Content:    string(content),
+		Tags:       make([]string, 0),
 		Parameters: make(map[string]Parameter),
 	}
 
@@ -100,24 +119,33 @@ func (p *SkillsToolsDriver) parseSkillFile(path string) (*Skill, error) {
 			}
 		}
 		if params, ok := frontmatter["parameters"].(map[string]any); ok {
-			for paramName, paramDef := range params {
+			for name, paramDef := range params {
 				if param, ok := paramDef.(map[string]any); ok {
 					p := Parameter{}
-					if t, ok := param["type"].(string); ok {
-						p.Type = t
+					if typ, ok := param["type"].(string); ok {
+						p.Type = typ
 					} else {
 						p.Type = "string" // default type
 					}
-					if d, ok := param["description"].(string); ok {
-						p.Description = d
+					if description, ok := param["description"].(string); ok {
+						p.Description = description
 					}
-					if r, ok := param["required"].(bool); ok {
-						p.Required = r
+					if required, ok := param["required"].(bool); ok {
+						p.Required = required
 					}
-					if def, ok := param["default"]; ok {
-						p.Default = def
+					if enumRaw, ok := param["enum"].(string); ok {
+						p.Enum = make([]string, 0)
+						for enum := range strings.SplitSeq(enumRaw, ",") {
+							if e := strings.TrimSpace(enum); e != "" {
+								p.Enum = append(p.Enum, e)
+							}
+						}
 					}
-					skill.Parameters[paramName] = p
+					if format, ok := param["format"].(string); ok {
+						p.Format = format
+					}
+
+					skill.Parameters[name] = p
 				}
 			}
 		}
@@ -204,7 +232,7 @@ func parseFrontmatter(content string) (map[string]any, string, error) {
 	return frontmatter, body, nil
 }
 
-func (p *SkillsToolsDriver) ListTools(_ context.Context, filter plugins.ListToolsFilter) (*plugins.ListToolsResponse, error) {
+func (p *SkillToolsPlugin) ListTools(_ context.Context, filter plugins.ListToolsFilter) (*plugins.ListToolsResponse, error) {
 	if p.skills == nil {
 		return nil, fmt.Errorf("plugin not configured, call SetConfig first")
 	}
@@ -215,14 +243,16 @@ func (p *SkillsToolsDriver) ListTools(_ context.Context, filter plugins.ListTool
 		if !skillMatchesFilter(def, filter) {
 			continue
 		}
-		p.log.Debug("Tool definition", "name", name, "description", skill.Description, "tags", skill.Tags)
+		p.driver.log.Debug("Tool definition", "name", name, "description", skill.Description, "tags", skill.Tags)
 		tools = append(tools, def)
 	}
 
-	return &plugins.ListToolsResponse{Tools: tools}, nil
+	return &plugins.ListToolsResponse{
+		Tools: tools,
+	}, nil
 }
 
-func (p *SkillsToolsDriver) GetTool(_ context.Context, name string) (*plugins.ToolDefinition, error) {
+func (p *SkillToolsPlugin) GetTool(_ context.Context, name string) (*plugins.ToolDefinition, error) {
 	if p.skills == nil {
 		return nil, fmt.Errorf("plugin not configured, call SetConfig first")
 	}
@@ -236,7 +266,7 @@ func (p *SkillsToolsDriver) GetTool(_ context.Context, name string) (*plugins.To
 	return &def, nil
 }
 
-func (p *SkillsToolsDriver) Validate(_ context.Context, req plugins.ExecuteRequest) (*plugins.ValidateResponse, error) {
+func (p *SkillToolsPlugin) Validate(_ context.Context, req plugins.ExecuteRequest) (*plugins.ValidateResponse, error) {
 	if p.skills == nil {
 		return nil, fmt.Errorf("plugin not configured, call SetConfig first")
 	}
@@ -250,65 +280,64 @@ func (p *SkillsToolsDriver) Validate(_ context.Context, req plugins.ExecuteReque
 	}
 
 	var errs []string
-	for paramName, param := range skill.Parameters {
+	for name, param := range skill.Parameters {
 		if !param.Required {
 			continue
 		}
-		v, present := req.Arguments[paramName]
+		v, present := req.Arguments[name]
 		if !present || v == nil {
-			errs = append(errs, fmt.Sprintf("%q is required", paramName))
+			errs = append(errs, fmt.Sprintf("%q is required", name))
 			continue
 		}
 		if param.Type == "string" {
 			if _, ok := v.(string); !ok {
-				errs = append(errs, fmt.Sprintf("%q must be a string", paramName))
+				errs = append(errs, fmt.Sprintf("%q must be a string", name))
 			}
 		}
 	}
 
-	return &plugins.ValidateResponse{Valid: len(errs) == 0, Errors: errs}, nil
+	return &plugins.ValidateResponse{
+		Valid:  len(errs) == 0,
+		Errors: errs,
+	}, nil
 }
 
 // skillToToolDefinition converts a Skill to a plugins.ToolDefinition.
 func skillToToolDefinition(name string, skill *Skill) plugins.ToolDefinition {
-	properties := make(map[string]any)
-	var required []string
+	properties := make(map[string]plugins.ToolProperty)
+	required := make([]string, 0)
 
-	for paramName, param := range skill.Parameters {
-		propDef := map[string]any{"type": param.Type}
-		if param.Description != "" {
-			propDef["description"] = param.Description
+	for name, param := range skill.Parameters {
+		prop := plugins.ToolProperty{
+			Type:        param.Type,
+			Description: param.Description,
+			Enum:        param.Enum,
+			Format:      param.Format,
 		}
-		if param.Default != nil {
-			propDef["default"] = param.Default
-		}
-		properties[paramName] = propDef
+		properties[name] = prop
+
 		if param.Required {
-			required = append(required, paramName)
-		}
-	}
-
-	var params map[string]any
-	if len(properties) > 0 {
-		params = map[string]any{
-			"type":       "object",
-			"properties": properties,
-		}
-		if len(required) > 0 {
-			params["required"] = required
+			required = append(required, name)
 		}
 	}
 
 	return plugins.ToolDefinition{
-		Name:               name,
-		Description:        skill.Description,
-		Parameters:         params,
+		Name:        name,
+		Description: skill.Description,
+		Parameters: plugins.ToolParameters{
+			Type:       "object",
+			Required:   required,
+			Properties: properties,
+		},
 		Tags:               skill.Tags,
 		Version:            skill.Version,
 		Deprecated:         skill.Deprecated,
 		DeprecationMessage: skill.DeprecationMessage,
 		Annotations: plugins.ToolAnnotations{
-			CostHint: "cheap",
+			ReadOnly:    skill.Readonly,
+			Destructive: skill.Destructive,
+			Idempotent:  skill.Idempotent,
+			CostHint:    "cheap",
 		},
 	}
 }
@@ -335,7 +364,7 @@ func skillMatchesFilter(def plugins.ToolDefinition, f plugins.ListToolsFilter) b
 	return true
 }
 
-func (p *SkillsToolsDriver) Execute(ctx context.Context, req plugins.ExecuteRequest) (*plugins.ExecuteResponse, error) {
+func (p *SkillToolsPlugin) Execute(ctx context.Context, req plugins.ExecuteRequest) (*plugins.ExecuteResponse, error) {
 	if p.skills == nil {
 		return nil, fmt.Errorf("plugin not configured, call SetConfig first")
 	}

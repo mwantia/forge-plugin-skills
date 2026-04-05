@@ -1,6 +1,5 @@
 package skills
 
-// Skill represents a parsed skill from a SKILL.md file.
 type Skill struct {
 	Path               string               `json:"path"`
 	Content            string               `json:"content"`
@@ -16,10 +15,10 @@ type Skill struct {
 	DeprecationMessage string               `json:"deprecation_message,omitempty"`
 }
 
-// Parameter represents a tool parameter definition.
 type Parameter struct {
-	Type        string `json:"type"`
-	Description string `json:"description"`
-	Required    bool   `json:"required,omitempty"`
-	Default     any    `json:"default,omitempty"`
+	Type        string   `json:"type"`
+	Description string   `json:"description"`
+	Required    bool     `json:"required,omitempty"`
+	Enum        []string `json:"enum,omitempty"`
+	Format      string   `json:"format,omitempty"`
 }
