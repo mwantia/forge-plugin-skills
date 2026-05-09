@@ -5,7 +5,7 @@ go 1.25.8
 require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/mitchellh/mapstructure v1.5.0
-	github.com/mwantia/forge-sdk v0.0.0-20260330200809-ad49c3efa981
+	github.com/mwantia/forge-sdk v0.1.0
 )
 
 require (
@@ -23,5 +23,3 @@ require (
 	google.golang.org/grpc v1.79.3 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 )
-
-replace github.com/mwantia/forge-sdk => ../../shared

@@ -1,4 +1,4 @@
-package skills
+package plugin
 
 import (
 	"context"
@@ -13,7 +13,7 @@ import (
 const (
 	PluginName        = "skills"
 	PluginAuthor      = "forge"
-	PluginVersion     = "0.1.0"
+	PluginVersion     = "0.5.0"
 	PluginDescription = "Skills tools for executing predefined agent skill definitions"
 )
 
@@ -25,18 +25,14 @@ type SkillsDriver struct {
 	tools  *SkillToolsPlugin
 }
 
-type SkillsToolsConfig struct {
-	Path string `mapstructure:"path"`
-}
-
 // NewSkillsDriver creates a new skills driver that supports tools plugin type.
 func NewSkillsDriver(log hclog.Logger) plugins.Driver {
 	return &SkillsDriver{
-		log: log.Named(PluginName),
+		log:    log.Named(PluginName),
+		config: NewDefaultConfig(),
 	}
 }
 
-// Lifecycle methods
 func (d *SkillsDriver) GetPluginInfo() plugins.PluginInfo {
 	return plugins.PluginInfo{
 		Name:        PluginName,
@@ -46,20 +42,23 @@ func (d *SkillsDriver) GetPluginInfo() plugins.PluginInfo {
 	}
 }
 
-func (d *SkillsDriver) ProbePlugin(ctx context.Context) (bool, error) {
-	// Validate path exists
-	info, err := os.Stat(d.tools.path)
+func (d *SkillsDriver) ProbePlugin(_ context.Context) (bool, error) {
+	if d.config.Path == "" {
+		return false, fmt.Errorf("skill path undefined")
+	}
+
+	info, err := os.Stat(d.config.Path)
 	if err != nil {
-		return false, fmt.Errorf("failed to access path '%s': %w", d.tools.path, err)
+		return false, fmt.Errorf("skills path %q not accessible: %w", d.config.Path, err)
 	}
 	if !info.IsDir() {
-		return false, fmt.Errorf("path '%s' is not a directory", d.tools.path)
+		return false, fmt.Errorf("skills path %q is not a directory", d.config.Path)
 	}
 
 	return true, nil
 }
 
-func (d *SkillsDriver) GetCapabilities(ctx context.Context) (*plugins.DriverCapabilities, error) {
+func (d *SkillsDriver) GetCapabilities(_ context.Context) (*plugins.DriverCapabilities, error) {
 	return &plugins.DriverCapabilities{
 		Types: []string{plugins.PluginTypeTools},
 		Tools: &plugins.ToolsCapabilities{
@@ -68,30 +67,32 @@ func (d *SkillsDriver) GetCapabilities(ctx context.Context) (*plugins.DriverCapa
 	}, nil
 }
 
-func (d *SkillsDriver) OpenDriver(ctx context.Context) error {
+func (d *SkillsDriver) OpenDriver(_ context.Context) error {
 	d.log.Info("Creating skills tools plugin")
-	var err error
 
-	d.tools, err = NewSkillToolsPlugin(d)
+	tools, err := NewSkillToolsPlugin(d)
 	if err != nil {
-		return fmt.Errorf("failed to create new tools plugin: %w", err)
+		return fmt.Errorf("failed to create tools plugin: %w", err)
 	}
 
+	d.tools = tools
 	return d.tools.scanSkills()
 }
 
-func (d *SkillsDriver) CloseDriver(ctx context.Context) error {
+func (d *SkillsDriver) CloseDriver(_ context.Context) error {
 	return nil
 }
 
-func (d *SkillsDriver) ConfigDriver(ctx context.Context, config plugins.PluginConfig) error {
-	if err := mapstructure.Decode(config.ConfigMap, &d.config); err != nil {
-		return fmt.Errorf("failed to decode config: %v", err)
+func (d *SkillsDriver) ConfigDriver(_ context.Context, config plugins.PluginConfig) error {
+	if err := mapstructure.Decode(config.ConfigMap, d.config); err != nil {
+		return fmt.Errorf("failed to decode config: %w", err)
 	}
-
 	return nil
 }
 
-func (d *SkillsDriver) GetToolsPlugin(ctx context.Context) (plugins.ToolsPlugin, error) {
-	return NewSkillToolsPlugin(d)
+func (d *SkillsDriver) GetToolsPlugin(_ context.Context) (plugins.ToolsPlugin, error) {
+	if d.tools == nil {
+		return nil, fmt.Errorf("driver not opened")
+	}
+	return d.tools, nil
 }
