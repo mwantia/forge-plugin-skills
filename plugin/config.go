@@ -36,9 +36,10 @@ const (
 //	    }
 //	}
 type SkillsToolsConfig struct {
-	Path string            `mapstructure:"path"`
-	Caps []SkillCapability `mapstructure:"capabilities"`
-	Exec SkillsExecConfig  `mapstructure:"exec"`
+	Path              string            `mapstructure:"path"`
+	Caps              []SkillCapability `mapstructure:"capabilities"`
+	ScanStandardPaths bool              `mapstructure:"scan_standard_paths"`
+	Exec              SkillsExecConfig  `mapstructure:"exec"`
 }
 
 type SkillsExecConfig struct {
@@ -66,6 +67,7 @@ func NewDefaultConfig() *SkillsToolsConfig {
 			CapRead,
 			CapExec,
 		},
+		ScanStandardPaths: true,
 		Exec: SkillsExecConfig{
 			AllowedEnvironment: []string{"HOME", "PATH", "TZ", "LANG"},
 			RuntimeTimeout:     "60s",

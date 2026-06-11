@@ -42,20 +42,40 @@ func (d *SkillsDriver) GetPluginInfo() plugins.PluginInfo {
 	}
 }
 
-func (d *SkillsDriver) ProbePlugin(_ context.Context) (bool, error) {
+func (d *SkillsDriver) GetPluginHealth(_ context.Context) (*plugins.PluginHealth, error) {
 	if d.config.Path == "" {
-		return false, fmt.Errorf("skill path undefined")
+		return &plugins.PluginHealth{
+			Status:  plugins.StatusUnhealthy,
+			Code:    plugins.HealthCodeConfigInvalid,
+			Message: "skill path undefined",
+			Action:  "Set path in the skills plugin config block.",
+		}, nil
 	}
 
 	info, err := os.Stat(d.config.Path)
 	if err != nil {
-		return false, fmt.Errorf("skills path %q not accessible: %w", d.config.Path, err)
-	}
-	if !info.IsDir() {
-		return false, fmt.Errorf("skills path %q is not a directory", d.config.Path)
+		return &plugins.PluginHealth{
+			Status:  plugins.StatusUnhealthy,
+			Code:    plugins.HealthCodeConfigInvalid,
+			Message: fmt.Sprintf("skills path %q not accessible: %v", d.config.Path, err),
+			Action:  "Ensure the skills directory exists and is readable.",
+		}, nil
 	}
 
-	return true, nil
+	if !info.IsDir() {
+		return &plugins.PluginHealth{
+			Status:  plugins.StatusUnhealthy,
+			Code:    plugins.HealthCodeConfigInvalid,
+			Message: fmt.Sprintf("skills path %q is not a directory", d.config.Path),
+			Action:  "Set path to a directory containing skill definition files.",
+		}, nil
+	}
+
+	return &plugins.PluginHealth{
+		Status:  plugins.StatusHealthy,
+		Code:    plugins.HealthCodeOK,
+		Message: "skills directory accessible",
+	}, nil
 }
 
 func (d *SkillsDriver) GetCapabilities(_ context.Context) (*plugins.DriverCapabilities, error) {

@@ -13,6 +13,23 @@ import (
 	"github.com/mwantia/forge-sdk/pkg/sandbox"
 )
 
+// standardSkillPaths returns the standard skill directories in priority order
+// (lowest to highest). The configured path is appended by the caller last.
+func standardSkillPaths() []string {
+	var paths []string
+	home, err := os.UserHomeDir()
+	if err == nil {
+		paths = append(paths,
+			filepath.Join(home, ".agents", "skills"),
+			filepath.Join(home, ".forge", "skills"),
+		)
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		paths = append(paths, filepath.Join(cwd, ".agents", "skills"))
+	}
+	return paths
+}
+
 type SkillToolsPlugin struct {
 	plugins.UnimplementedToolsPlugin
 
@@ -64,14 +81,21 @@ func (p *SkillToolsPlugin) System(_ context.Context) (string, error) {
 // scanSkills discovers SKILL.md files across all configured paths.
 // Later paths take priority on name collision (configured path is highest priority).
 func (p *SkillToolsPlugin) scanSkills() error {
-	info, err := os.Stat(p.path)
-	if err != nil || !info.IsDir() {
-		return fmt.Errorf("failed to scan skill path %q: %w", p.path, err)
+	paths := []string{}
+	if p.driver.config.ScanStandardPaths {
+		paths = append(paths, standardSkillPaths()...)
 	}
+	paths = append(paths, p.path)
 
-	p.driver.log.Debug("Scanning skills directory", "path", p.path)
-	if err := filepath.WalkDir(p.path, p.scanDirectory); err != nil {
-		p.driver.log.Warn("Error scanning skills directory", "path", p.path, "error", err)
+	for _, dir := range paths {
+		info, err := os.Stat(dir)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		p.driver.log.Debug("Scanning skills directory", "path", dir)
+		if err := filepath.WalkDir(dir, p.scanDirectory); err != nil {
+			p.driver.log.Warn("Error scanning skills directory", "path", dir, "error", err)
+		}
 	}
 
 	p.driver.log.Info("Skills loaded", "count", len(p.skills))
@@ -313,7 +337,7 @@ func (p *SkillToolsPlugin) Execute(ctx context.Context, req plugins.ExecuteReque
 // --- Execute handlers ---
 
 func (p *SkillToolsPlugin) executeActivate(ctx context.Context, req plugins.ExecuteRequest) (*plugins.ExecuteResponse, error) {
-	name, _ := req.Arguments["name"].(string)
+	name := req.Args.Get("name").StringOr("")
 	skill, ok := p.skills[name]
 	if !ok {
 		return &plugins.ExecuteResponse{
@@ -344,8 +368,8 @@ func (p *SkillToolsPlugin) executeActivate(ctx context.Context, req plugins.Exec
 var readFileAllowedDirs = []string{"scripts", "references", "assets"}
 
 func (p *SkillToolsPlugin) executeReadFile(ctx context.Context, req plugins.ExecuteRequest) (*plugins.ExecuteResponse, error) {
-	skillName, _ := req.Arguments["skill"].(string)
-	relPath, _ := req.Arguments["path"].(string)
+	skillName := req.Args.Get("skill").StringOr("")
+	relPath := req.Args.Get("path").StringOr("")
 
 	skill, ok := p.skills[skillName]
 	if !ok {
@@ -378,8 +402,8 @@ func (p *SkillToolsPlugin) executeReadFile(ctx context.Context, req plugins.Exec
 }
 
 func (p *SkillToolsPlugin) executeListFiles(ctx context.Context, req plugins.ExecuteRequest) (*plugins.ExecuteResponse, error) {
-	skillName, _ := req.Arguments["skill"].(string)
-	subDir, _ := req.Arguments["directory"].(string)
+	skillName := req.Args.Get("skill").StringOr("")
+	subDir := req.Args.Get("directory").StringOr("")
 	if subDir == "" {
 		subDir = "."
 	}
@@ -423,8 +447,8 @@ func (p *SkillToolsPlugin) executeListFiles(ctx context.Context, req plugins.Exe
 }
 
 func (p *SkillToolsPlugin) executeScript(ctx context.Context, req plugins.ExecuteRequest) (*plugins.ExecuteResponse, error) {
-	skillName, _ := req.Arguments["skill"].(string)
-	scriptRel, _ := req.Arguments["script"].(string)
+	skillName := req.Args.Get("skill").StringOr("")
+	scriptRel := req.Args.Get("script").StringOr("")
 
 	skill, ok := p.skills[skillName]
 	if !ok {
@@ -437,7 +461,7 @@ func (p *SkillToolsPlugin) executeScript(ctx context.Context, req plugins.Execut
 	}
 
 	var cmdArgs []string
-	if args, ok := req.Arguments["args"].([]any); ok {
+	if args, ok := req.Args.Get("args").Raw().([]any); ok {
 		for i, a := range args {
 			s, ok := a.(string)
 			if !ok {
@@ -454,7 +478,7 @@ func (p *SkillToolsPlugin) executeScript(ctx context.Context, req plugins.Execut
 	}
 
 	var extraEnv []string
-	if envMap, ok := req.Arguments["env"].(map[string]any); ok {
+	if envMap, ok := req.Args.Get("env").Raw().(map[string]any); ok {
 		for k, v := range envMap {
 			if s, ok := v.(string); ok {
 				extraEnv = append(extraEnv, k+"="+s)

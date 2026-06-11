@@ -5,8 +5,10 @@ go 1.25.8
 require (
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/mitchellh/mapstructure v1.5.0
-	github.com/mwantia/forge-sdk v0.1.0
+	github.com/mwantia/forge-sdk v0.0.0-20260330200809-ad49c3efa981
 )
+
+replace github.com/mwantia/forge-sdk => ../../sdk
 
 require (
 	github.com/fatih/color v1.16.0 // indirect
